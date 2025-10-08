@@ -1,0 +1,66 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(data.table)
+library(readxl)
+library(stringr)
+library(ggplot2)
+```
+
+```{r}
+source("functions.R")
+```
+
+```{r}
+f_excel <- "../data-raw/wiezienia_excel.xlsx"
+sheets <- excel_sheets(f_excel)
+prisons <- data.table(sheets)
+head(prisons)
+```
+
+```{r}
+d <- lapply(prisons$sheets, \(x) {
+  doc <- read_excel(f_excel, sheet = x)
+  subset(doc, panstwo != "Ogółem")
+})
+names(d) <- prisons$sheets
+d_long <- rbindlist(d, idcol = "month_sheet")
+d_long[, year:=str_extract(month_sheet, "\\d{4}")]
+d_long[, month:=month_to_number(month_sheet)]
+d_long[, panstwo:=str_to_lower(str_trim(panstwo))]
+d_long[, iso3c := polish_to_iso3c(panstwo)]
+d_long[, corrected:=str_detect(month_sheet, "korekta tabl")]
+d_long[, month_sheet:=NULL]
+d_long[, names(d_long)[2:10] := lapply(.SD, as.numeric), .SDcols = names(d_long)[2:10]]
+d_long[is.na(k_skazane), k_skazane := 0]
+df_long <- melt(d_long, id.vars = c("year", "month", "panstwo", "iso3c", "corrected"))
+df_long[, c("sex", "category") := tstrsplit(variable, "_")]
+df_long <- df_long[sex %in% c("k", "m") & !category %in% c("razem", NA)]
+df_long[, variable:= NULL]
+setcolorder(df_long, c("year", "month", "panstwo", "iso3c", "corrected", "sex", "category"))
+setorderv(df_long, c("year", "month"))
+df_long <- df_long[value != 0]
+df_long[, corr:=uniqueN(corrected), .(year, month)]
+df_long <- df_long[corr == 1 | (corr == 2 & corrected == TRUE)]
+df_long[, corr:=NULL]
+df_long[, corrected:=NULL]
+df_long[, category := fcase(category %in% c("skazani", "skazane"), "convicted", 
+                            category %in% c("ukarani", "ukarane"), "punished",
+                            category %in% "tymczas", "temporary")]
+df_long[, .N, category]
+setnames(df_long, "panstwo", "country")
+fwrite(df_long, file = "../data/prison-data.csv")
+```
+
+```{r}
+df_long[, .(val=sum(value)), .(ym=str_c(year, "-", month), category)] |>
+  ggplot(data = _, aes(x = ym, y= val, group = category, color = category)) +
+  geom_line()
+
+df_long[, .(val=sum(value)), .(ym=str_c(year, "-", month))] |>
+  dput()
+```
+
