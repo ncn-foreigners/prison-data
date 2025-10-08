@@ -8,6 +8,34 @@ library(data.table)
 library(readxl)
 library(stringr)
 library(ggplot2)
+library(rvest)
+
+```
+Urls
+
+```{r}
+prison_webpage <- "https://www.sw.gov.pl/strona/Statystyka"
+
+read_html(prison_webpage) |>
+  html_nodes("div.files > div.file") |>
+  html_text() |>
+  str_remove_all("\\r|\\n") |>
+  str_trim() |>
+  str_replace_all("\\s{1,}", " ") -> pdf_names
+
+read_html(prison_webpage) |>
+  html_nodes("div.files > div.file") |>
+  html_node("a") |> 
+  html_attr("href") -> pdf_links
+
+prison_pdf_reports <- data.frame(
+  pdf_names,
+  pdf_links = paste0("https://www.sw.gov.pl", pdf_links)
+)
+prison_pdf_reports <- prison_pdf_reports[-c(1,2), ] |>
+  transform(type = str_extract(pdf_links, "(docx|pdf|xls|xlsx)$"))
+
+tail(prison_pdf_reports)
 ```
 
 ```{r}
