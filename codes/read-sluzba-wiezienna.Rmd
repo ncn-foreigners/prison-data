@@ -206,18 +206,25 @@ Read data parsed via the Mathpix parsing of pdf
 
 ```{r}
 d <- read_html("../data-raw/prison-cudzoziemcy.html") |>
-  html_table()
+  html_table() ## 125
 
-for (i in which(sapply(d, ncol) == 12)) {
+for (i in which(sapply(d, ncol) %in% 12:13)) {
   d[[i]]$X11 <- d[[i]]$X12
+  d[[i]]$X12 <- NULL
+  d[[i]]$X13 <- NULL
 }
 
-names(d) <- list.files("../data-raw/pdf-single-pages/")
+file_names <- read_html("../data-raw/prison-cudzoziemcy.html") |>
+  html_nodes("div.caption_table") |>
+  html_text() ## 124
+
+names(d) <- str_extract(file_names, "\\d{2}.\\d{2}.\\d{4}")
 
 prison_pdf_df <- rbindlist(d, idcol = "plik", fill = T)
 prison_pdf_df <- prison_pdf_df[!X2 %in% c("Obywatelstwo", "Ogółem")]
 prison_pdf_df[, X12:=NULL]
 prison_pdf_df[, (paste0("X", 3:11)) := lapply(.SD, as.numeric), .SDcols = paste0("X", 3:11)]
+
 setnames(prison_pdf_df,
          names(prison_pdf_df),
          c("plik", "lp", "country", 
@@ -235,6 +242,8 @@ prison_pdf_df[, iso3c := polish_to_iso3c(country)]
 prison_pdf_df[, year:=str_extract(plik, "^\\d{4}")]
 prison_pdf_df[, month:=str_extract(plik, "\\d{2}\\.")]
 prison_pdf_df[, month := as.numeric(month)]
+
+
 prison_pdf_df[, plik:= NULL]
 prison_pdf_df[, lp:= NULL]
 
@@ -246,10 +255,11 @@ prison_pdf_df[, c("sex", "category") := tstrsplit(variable, "_")]
 prison_pdf_df[, variable:=NULL]
 setcolorder(prison_pdf_df, c("year", "month", "country", "iso3c", "sex", "category"))
 
-prison_pdf_df[, .N, year]
+prison_pdf_df[is.na(year)]
 
 prison_pdf_df[category != "total", .(value = sum(value, na.rm=T)), .(year, month)]
 ```
+
 30.11.2018 r. - 1053 zamiast 1043
 31.03.2019 r - 1115 vs 1125
 od 2020 robi sie 1700 zamiast 1309 -- do sprawdzenia
