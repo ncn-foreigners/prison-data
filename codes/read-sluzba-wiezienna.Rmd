@@ -9,7 +9,14 @@ library(readxl)
 library(stringr)
 library(ggplot2)
 library(rvest)
+library(pdftools)
+library(tabulapdf)
+library(glue)
+library(rvest)
+```
 
+```{r}
+source("functions.R")
 ```
 Urls
 
@@ -36,11 +43,37 @@ prison_pdf_reports <- prison_pdf_reports[-c(1,2), ] |>
   transform(type = str_extract(pdf_links, "(docx|pdf|xls|xlsx)$"))
 
 tail(prison_pdf_reports)
+
+months_pl <- c("styczeń"="01", "styczen"="01", "stycznia"="01",
+  "luty"="02", "lutego"="02",
+  "marzec"="03", "marca"="03",
+  "kwiecień"="04", "kwiecien"="04", "kwietnia"="04",
+  "maj"="05", "maja"="05",
+  "czerwiec"="06", "czerwca"="06",
+  "lipiec"="07", "lipca"="07",
+  "sierpień"="08", "sierpien"="08", "sierpnia"="08",
+  "wrzesień"="09", "wrzesien"="09", "września"="09", "wrzesnia"="09",
+  "październik"="10", "pazdziernik"="10", "października"="10", "pazdziernika"="10",
+  "listopad"="11", "listopada"="11",
+  "grudzień"="12", "grudzien"="12", "grudnia"="12")
+
+prison_pdf_reports <- prison_pdf_reports |>
+  transform(
+    filename = paste0(
+      str_extract(pdf_names, "\\d{4}"),  
+      "-",
+      months_pl[str_extract(tolower(pdf_names), paste(names(months_pl), collapse="|"))],  # miesiąc
+      ".",
+      type  # rozszerzenie
+    )
+  ) |>
+  transform(path = paste0("../data-raw/pdfs/", filename))
+
+head(prison_pdf_reports)
+saveRDS(prison_pdf_reports, file = "../data-raw/links-pdf-xlsx.rds")
 ```
 
-```{r}
-source("functions.R")
-```
+Data processed by Aniela (from 2020, September)
 
 ```{r}
 f_excel <- "../data-raw/wiezienia_excel.xlsx"
@@ -48,6 +81,10 @@ sheets <- excel_sheets(f_excel)
 prisons <- data.table(sheets)
 head(prisons)
 ```
+
+
+# Process excel files
+
 
 ```{r}
 d <- lapply(prisons$sheets, \(x) {
@@ -90,5 +127,141 @@ df_long[, .(val=sum(value)), .(ym=str_c(year, "-", month), category)] |>
 
 df_long[, .(val=sum(value)), .(ym=str_c(year, "-", month))] |>
   dput()
+```
+
+
+# Download data from 2010
+
+
+```{r}
+prison_pdf_reports |> 
+  subset(!str_detect(filename, "NA")) |>
+  subset(
+    (as.numeric(str_extract(filename, "\\d{4}")) == 2010 & as.numeric(str_remove(str_extract(filename, "-\\d{2}"), "-")) >=4) |
+     as.numeric(str_extract(filename, "\\d{4}")) %in% 2011:2019 |
+    (as.numeric(str_extract(filename, "\\d{4}")) == 2020 & as.numeric(str_remove(str_extract(filename, "-\\d{2}"), "-")) < 9)
+  ) -> files_to_download
+
+setDT(files_to_download)
+files_to_download <- files_to_download[order(filename)]
+```
+
+Download pdf files
+
+```{r}
+for (i in 15:NROW(files_to_download)) {
+  download.file(url = files_to_download$pdf_links[i],
+                destfile = files_to_download$path[i])
+}
+```
+
+
+```{r}
+pages <- numeric() 
+
+pdf_to_process <- files_to_download[type == "pdf"]
+
+for (i in 1:NROW(pdf_to_process)) {
+  
+  if (!file.exists(pdf_to_process$path[i])) {
+    pages[i]  <- NA
+    next
+  }
+  pdf_file_txt <- pdftools::pdf_text(pdf_to_process$path[i])  
+
+pages[i] <- pdf_file_txt[2] |>
+  trimws() |> 
+  str_split("\\n") |>
+  {\(x) x[[1]]}() |>
+  {\(x) x[str_detect(x, regex("cudzoziemcy|obcokrajowcy", T))]}() |>
+  {\(x) as.numeric(str_extract(x, "\\d{2}$"))}()
+
+}
+
+pdf_to_process$page <- pages + 3 
+```
+
+Extract specific pages and save them into one pdf
+
+```{r}
+dir.create("../data-raw/pdf-single-pages")
+```
+
+```{r}
+pdf_to_process_singles <- subset(pdf_to_process, !is.na(page))
+pdf_to_process_singles <- pdf_to_process_singles[order(path)]
+
+for (i in 1:NROW(pdf_to_process_singles)) {
+  system(glue("pdftk {pdf_to_process_singles$path[i]} cat {pdf_to_process_singles$page[i]} output {paste0('../data-raw/pdf-single-pages/', basename(pdf_to_process_singles$path[i]))}"))
+}
+```
+
+Combine into one pdf
+
+```{bash}
+pdftk ../data-raw/pdf-single-pages/*.pdf cat output ../data-raw/prison-cudzoziemcy.pdf
+```
+
+Read data parsed via the Mathpix parsing of pdf
+
+```{r}
+d <- read_html("../data-raw/prison-cudzoziemcy.html") |>
+  html_table()
+
+for (i in which(sapply(d, ncol) == 12)) {
+  d[[i]]$X11 <- d[[i]]$X12
+}
+
+names(d) <- list.files("../data-raw/pdf-single-pages/")
+
+prison_pdf_df <- rbindlist(d, idcol = "plik", fill = T)
+prison_pdf_df <- prison_pdf_df[!X2 %in% c("Obywatelstwo", "Ogółem")]
+prison_pdf_df[, X12:=NULL]
+prison_pdf_df[, (paste0("X", 3:11)) := lapply(.SD, as.numeric), .SDcols = paste0("X", 3:11)]
+setnames(prison_pdf_df,
+         names(prison_pdf_df),
+         c("plik", "lp", "country", 
+           "total",
+           "m_total", "m_temporary", "m_convicted", "m_punished",
+           "k_total", "k_temporary", "k_convicted", "k_punished"
+           ))
+
+prison_pdf_df <- prison_pdf_df[country != ""]
+prison_pdf_df <- prison_pdf_df[country != "powrót do spisu treści"]
+prison_pdf_df <- prison_pdf_df[country != "powrót do spisu"]
+
+prison_pdf_df[, country:=str_to_lower(str_trim(country))]
+prison_pdf_df[, iso3c := polish_to_iso3c(country)]
+prison_pdf_df[, year:=str_extract(plik, "^\\d{4}")]
+prison_pdf_df[, month:=str_extract(plik, "\\d{2}\\.")]
+prison_pdf_df[, month := as.numeric(month)]
+prison_pdf_df[, plik:= NULL]
+prison_pdf_df[, lp:= NULL]
+
+prison_pdf_df <- prison_pdf_df |>
+  melt(id.vars = c("year", "month", "country", "iso3c")) |>
+  subset(variable != "total")
+
+prison_pdf_df[, c("sex", "category") := tstrsplit(variable, "_")]
+prison_pdf_df[, variable:=NULL]
+setcolorder(prison_pdf_df, c("year", "month", "country", "iso3c", "sex", "category"))
+
+prison_pdf_df[, .N, year]
+
+prison_pdf_df[category != "total", .(value = sum(value, na.rm=T)), .(year, month)]
+```
+30.11.2018 r. - 1053 zamiast 1043
+31.03.2019 r - 1115 vs 1125
+od 2020 robi sie 1700 zamiast 1309 -- do sprawdzenia
+
+```{r}
+prison_all <- rbind(df_long, prison_pdf_df)
+prison_all <- prison_all[order(year, month)]
+prison_all[,.N, .(p=paste0(year,"-",month))]
+prison_all[, .(m=uniqueN(month)), year]
+prison_all <- prison_all[value > 0]
+prison_all <- prison_all[category != "total"]
+unique(prison_all)[, .(n=sum(value)), .(ym=paste0(year,"-",month))]
+
 ```
 
