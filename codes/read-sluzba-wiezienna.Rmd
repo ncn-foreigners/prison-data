@@ -206,7 +206,8 @@ Read data parsed via the Mathpix parsing of pdf
 
 ```{r}
 d <- read_html("../data-raw/prison-cudzoziemcy.html") |>
-  html_table() ## 125
+  html_nodes("div.table") |>
+  html_table()
 
 for (i in which(sapply(d, ncol) %in% 12:13)) {
   d[[i]]$X11 <- d[[i]]$X12
@@ -221,6 +222,7 @@ file_names <- read_html("../data-raw/prison-cudzoziemcy.html") |>
 names(d) <- str_extract(file_names, "\\d{2}.\\d{2}.\\d{4}")
 
 prison_pdf_df <- rbindlist(d, idcol = "plik", fill = T)
+prison_pdf_df[, plik:=as.Date(plik, "%d.%m.%Y")]
 prison_pdf_df <- prison_pdf_df[!X2 %in% c("Obywatelstwo", "Ogółem")]
 prison_pdf_df[, X12:=NULL]
 prison_pdf_df[, (paste0("X", 3:11)) := lapply(.SD, as.numeric), .SDcols = paste0("X", 3:11)]
@@ -239,8 +241,8 @@ prison_pdf_df <- prison_pdf_df[country != "powrót do spisu"]
 
 prison_pdf_df[, country:=str_to_lower(str_trim(country))]
 prison_pdf_df[, iso3c := polish_to_iso3c(country)]
-prison_pdf_df[, year:=str_extract(plik, "^\\d{4}")]
-prison_pdf_df[, month:=str_extract(plik, "\\d{2}\\.")]
+prison_pdf_df[, year:=year(plik)]
+prison_pdf_df[, month:=month(plik)]
 prison_pdf_df[, month := as.numeric(month)]
 
 
@@ -254,8 +256,6 @@ prison_pdf_df <- prison_pdf_df |>
 prison_pdf_df[, c("sex", "category") := tstrsplit(variable, "_")]
 prison_pdf_df[, variable:=NULL]
 setcolorder(prison_pdf_df, c("year", "month", "country", "iso3c", "sex", "category"))
-
-prison_pdf_df[is.na(year)]
 
 prison_pdf_df[category != "total", .(value = sum(value, na.rm=T)), .(year, month)]
 ```
@@ -271,7 +271,14 @@ prison_all[,.N, .(p=paste0(year,"-",month))]
 prison_all[, .(m=uniqueN(month)), year]
 prison_all <- prison_all[value > 0]
 prison_all <- prison_all[category != "total"]
-unique(prison_all)[, .(n=sum(value)), .(ym=paste0(year,"-",month))]
 
+prison_all[, .(n=sum(value)), .(ym=paste0(year,"-",month))]  |>
+  ggplot(data=_, aes(x = ym, y = n, group = 1)) +
+  geom_line() 
+
+```
+
+```{r}
+fwrite(prison_all, file = "../data/prison-data-2010-2025.csv")
 ```
 
