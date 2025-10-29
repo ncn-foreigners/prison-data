@@ -13,6 +13,7 @@ library(pdftools)
 library(tabulapdf)
 library(glue)
 library(rvest)
+library(lubridate)
 ```
 
 ```{r}
@@ -271,14 +272,32 @@ prison_all[,.N, .(p=paste0(year,"-",month))]
 prison_all[, .(m=uniqueN(month)), year]
 prison_all <- prison_all[value > 0]
 prison_all <- prison_all[category != "total"]
-
-prison_all[, .(n=sum(value)), .(ym=paste0(year,"-",month))]  |>
-  ggplot(data=_, aes(x = ym, y = n, group = 1)) +
-  geom_line() 
-
 ```
 
 ```{r}
 fwrite(prison_all, file = "../data/prison-data-2010-2025.csv")
+```
+
+```{r}
+writexl::write_xlsx(x = prison_all, path = "../data/prison-data-2010-2025.xlsx")
+```
+
+Visualisation
+
+```{r}
+prison_all <- fread("../data/prison-data-2010-2025.csv")
+```
+
+
+```{r}
+prison_all[, .(n = sum(value)), 
+           .(category, time=ymd(paste(year, month, 15, sep = "-")))] |>
+  ggplot(data = _, aes(x = time, y = n, color = category, group = category)) +
+  geom_line() +
+  labs(x = "Month", y = "Number of people", color = "Category",
+       title = "Foreigners in Polish prisons between 2010-04 and 2025-07",
+       subtitle = "Based on montly reports by Polish Prison Service") 
+
+ggsave(filename = "../figs/prison-numbers.png", width = 10, height = 6)
 ```
 

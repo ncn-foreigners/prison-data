@@ -1,3 +1,5 @@
-Reading prison data
+Codes to read prison data
 
-Source: https://www.sw.gov.pl/dzial/statystyka
+
+![](figs/prison-numbers.png)
+Source: <https://www.sw.gov.pl/dzial/statystyka>
