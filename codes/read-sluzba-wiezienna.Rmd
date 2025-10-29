@@ -295,8 +295,8 @@ prison_all[, .(n = sum(value)),
   ggplot(data = _, aes(x = time, y = n, color = category, group = category)) +
   geom_line() +
   labs(x = "Month", y = "Number of people", color = "Category",
-       title = "Foreigners in Polish prisons between 2010-04 and 2025-07",
-       subtitle = "Based on montly reports by Polish Prison Service") 
+     title = "Foreigners in Polish prisons between April 2010 and July 2025",
+     subtitle = "Based on monthly reports by the Polish Prison Service")
 
 ggsave(filename = "../figs/prison-numbers.png", width = 10, height = 6)
 ```
